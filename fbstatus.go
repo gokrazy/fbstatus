@@ -81,45 +81,35 @@ var colorNameToRGBA = map[string]color.NRGBA{
 	"white":    color.NRGBA{R: 0xEE, G: 0xEE, B: 0xEC},
 }
 
-func fbstatus() error {
-	ctx := context.Background()
+type statusDrawer struct {
+	// config
+	img      draw.Image
+	bounds   image.Rectangle
+	w, h     int
+	buffer   *image.RGBA
+	files    map[string]*os.File
+	bgcolor  color.RGBA
+	hostname string
+	modules  []statexp.ProcessAndFormatter
+	g        *gg.Context
+	gstat    *gg.Context
+	ggopher  *gg.Context
 
-	// Cancel the context instead of exiting the program:
-	ctx, canc := signal.NotifyContext(ctx, os.Interrupt)
-	defer canc()
+	// state
+	slowPathNotified     bool
+	last                 [][][]string
+	lastRender, lastCopy time.Duration
+}
 
-	cons, err := console.LeaseForGraphics()
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := cons.Cleanup(); err != nil {
-			log.Print(err)
-		}
-	}()
-
-	dev, err := fb.Open("/dev/fb0")
-	if err != nil {
-		return err
-	}
-
-	if info, err := dev.VarScreeninfo(); err == nil {
-		log.Printf("framebuffer screeninfo: %+v", info)
-	}
-
-	img, err := dev.Image()
-	if err != nil {
-		return err
-	}
+func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	bounds := img.Bounds()
 	w := bounds.Max.X
 	h := bounds.Max.Y
-	statArea := image.Rect(0, h/2, w, h)
 
 	// draw the gokrazy gopher image
 	gokrazyLogo, _, err := image.Decode(bytes.NewReader(gokrazyLogoPNG))
 	if err != nil {
-		log.Print(err)
+		return nil, err
 	}
 
 	bgcolor := color.RGBA{R: 50, G: 50, B: 50, A: 255}
@@ -149,7 +139,7 @@ func fbstatus() error {
 	// draw textual information in a block of key: value details
 	font, err := truetype.Parse(goregular.TTF)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	size := float64(16)
@@ -161,14 +151,14 @@ func fbstatus() error {
 
 	monofont, err := truetype.Parse(gomono.TTF)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	monoface := truetype.NewFace(monofont, &truetype.Options{Size: size})
 	gstat.SetFontFace(monoface)
 
 	italicfont, err := truetype.Parse(goitalic.TTF)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	italicface := truetype.NewFace(italicfont, &truetype.Options{Size: 2 * size})
 	ggopher.SetFontFace(italicface)
@@ -208,7 +198,7 @@ func fbstatus() error {
 			}
 			fl, err := os.Open(f)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			files[f] = fl
 		}
@@ -216,197 +206,257 @@ func fbstatus() error {
 
 	// --------------------------------------------------------------------------------
 
+	return &statusDrawer{
+		img:      img,
+		bounds:   bounds,
+		w:        w,
+		h:        h,
+		buffer:   buffer,
+		modules:  modules,
+		hostname: hostname,
+		files:    files,
+		bgcolor:  bgcolor,
+		g:        g,
+		gstat:    gstat,
+		ggopher:  ggopher,
+
+		last: make([][][]string, 10),
+	}, nil
+}
+
+func (d *statusDrawer) draw1(ctx context.Context) error {
 	const lineSpacing = 1.5
 
-	slowPathNotified := false
+	statArea := image.Rect(0, d.h/2, d.w, d.h)
+
+	// --------------------------------------------------------------------------------
+	contents := make(map[string][]byte)
+	for path, fl := range d.files {
+		if _, err := fl.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		b, err := ioutil.ReadAll(fl)
+		if err != nil {
+			return err
+		}
+		contents[path] = b
+	}
+
+	{
+		r, gg, b, a := d.bgcolor.RGBA()
+		d.gstat.SetRGBA(
+			float64(r)/0xffff,
+			float64(gg)/0xffff,
+			float64(b)/0xffff,
+			float64(a)/0xffff)
+	}
+	d.gstat.Clear()
+	d.gstat.SetRGB(1, 1, 1)
+
+	em, _ := d.gstat.MeasureString("m")
+
+	// render header
+	statx := float64(50)
+	// TODO: look into why MeasureString/DrawString are not monospace-correct
+	for _, hdr := range []string{
+		" usr",
+		" sys",
+		" idl",
+		" wai",
+		" stl",
+		" | ",
+		" read ",
+		" writ ",
+		" | ",
+		" int  ",
+		" csw  ",
+		" | ",
+		" recv ",
+		" send ",
+		" | ",
+		" used ",
+		" free ",
+		" buff ",
+		" cach",
+	} {
+		d.gstat.DrawString(hdr, statx, 50)
+		statx += float64(len(hdr)) * em
+	}
+
+	staty := float64(110)
+	statx = float64(50)
+
+	for idx := range d.last {
+		if idx == len(d.last)-1 {
+			break
+		}
+		d.last[idx] = d.last[idx+1]
+	}
+
+	var lastrow [][]string
+	for _, mod := range d.modules {
+		var modcols []string
+		cols := mod.ProcessAndFormat(contents)
+		for _, col := range cols {
+			colored := col.RenderCustom(func(color, text string) string {
+				return "$" + color + "$" + text
+			})
+			modcols = append(modcols, colored)
+		}
+		lastrow = append(lastrow, modcols)
+	}
+	d.last[len(d.last)-1] = lastrow
+
+	for _, lastrow := range d.last {
+		statx = 50
+		for _, modcols := range lastrow {
+			for _, colored := range modcols {
+				statx += em
+				for idx, field := range strings.Split(strings.TrimPrefix(colored, "$"), "$") {
+
+					if idx%2 == 0 {
+						col := colorNameToRGBA[field]
+						d.gstat.SetRGB255(int(col.R), int(col.G), int(col.B))
+					} else {
+						d.gstat.DrawString(field, statx, staty)
+						statx += float64(len(field)) * em
+					}
+				}
+
+			}
+			statx += 3 * em
+		}
+		staty += d.gstat.FontHeight() * lineSpacing
+	}
+
+	// --------------------------------------------------------------------------------
+
+	t2 := time.Now()
+	{
+		r, gg, b, a := d.bgcolor.RGBA()
+		d.g.SetRGBA(
+			float64(r)/0xffff,
+			float64(gg)/0xffff,
+			float64(b)/0xffff,
+			float64(a)/0xffff)
+	}
+	d.g.Clear()
+	d.g.SetRGB(1, 1, 1)
+	lines := []string{
+		"host “" + d.hostname + "” (" + gokrazy.Model() + ")",
+		"time: " + time.Now().Format(time.RFC3339),
+	}
+	if up, err := uptime(); err == nil {
+		last := len(lines) - 1
+		lines[last] += ", up for " + up
+	}
+	if d.lastRender > 0 || d.lastCopy > 0 {
+		last := len(lines) - 1
+		lines[last] += fmt.Sprintf(", fb: draw %v, cp %v",
+			d.lastRender.Round(time.Millisecond),
+			d.lastCopy.Round(time.Millisecond))
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Private IP addresses:")
+	if addrs, err := gokrazy.PrivateInterfaceAddrs(); err == nil {
+		lines = append(lines, addrs...)
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Public IP addresses:")
+	if addrs, err := gokrazy.PublicInterfaceAddrs(); err == nil {
+		lines = append(lines, addrs...)
+	}
+	texty := 100
+
+	for _, line := range lines {
+		d.g.DrawString(line, 50, float64(texty))
+		texty += int(d.g.FontHeight() * lineSpacing)
+	}
+	leftHalf := image.Rect(0, 0, d.w/2, d.h)
+	draw.Draw(d.buffer, leftHalf, d.g.Image(), image.ZP, draw.Src)
+
+	rightHalf := image.Rect(d.w/2, 0, d.w, 150)
+	draw.Draw(d.buffer, rightHalf, d.ggopher.Image(), image.ZP, draw.Src)
+
+	// display stat output in the bottom half
+	draw.Draw(d.buffer, statArea, d.gstat.Image(), image.ZP, draw.Src)
+
+	d.lastRender = time.Since(t2)
+
+	t3 := time.Now()
+	// NOTE: This code path is NOT using double buffering (which is done
+	// using the pan ioctl when using the frame buffer), but in practice
+	// updates seem smooth enough, most likely because we are only
+	// updating timestamps.
+	if x, ok := d.img.(*fbimage.BGR565); ok {
+		copyRGBAtoBGR565(x, d.buffer)
+	} else {
+		if !d.slowPathNotified {
+			log.Printf("framebuffer not using pixel format BGR565, falling back to slow path")
+			d.slowPathNotified = true
+		}
+		draw.Draw(d.img, d.bounds, d.buffer, image.Point{}, draw.Src)
+	}
+	d.lastCopy = time.Since(t3)
+	return nil
+}
+
+func fbstatus() error {
+	ctx := context.Background()
+
+	// Cancel the context instead of exiting the program:
+	ctx, canc := signal.NotifyContext(ctx, os.Interrupt)
+	defer canc()
+
+	cons, err := console.LeaseForGraphics()
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err := cons.Cleanup(); err != nil {
+			log.Print(err)
+		}
+	}()
+
+	dev, err := fb.Open("/dev/fb0")
+	if err != nil {
+		return err
+	}
+
+	if info, err := dev.VarScreeninfo(); err == nil {
+		log.Printf("framebuffer screeninfo: %+v", info)
+	}
+
+	img, err := dev.Image()
+	if err != nil {
+		return err
+	}
+
+	drawer, err := newStatusDrawer(img)
+	if err != nil {
+		return err
+	}
+
 	tick := time.Tick(1 * time.Second)
-	last := make([][][]string, 10)
-	var lastRender, lastCopy time.Duration
 	for {
 		if cons.Visible() {
-			// --------------------------------------------------------------------------------
-			contents := make(map[string][]byte)
-			for path, fl := range files {
-				if _, err := fl.Seek(0, io.SeekStart); err != nil {
-					return err
-				}
-				b, err := ioutil.ReadAll(fl)
-				if err != nil {
-					return err
-				}
-				contents[path] = b
+			if err := drawer.draw1(ctx); err != nil {
+				return err
 			}
-
-			{
-				r, gg, b, a := bgcolor.RGBA()
-				gstat.SetRGBA(
-					float64(r)/0xffff,
-					float64(gg)/0xffff,
-					float64(b)/0xffff,
-					float64(a)/0xffff)
-			}
-			gstat.Clear()
-			gstat.SetRGB(1, 1, 1)
-
-			em, _ := gstat.MeasureString("m")
-
-			// render header
-			statx := float64(50)
-			// TODO: look into why MeasureString/DrawString are not monospace-correct
-			for _, hdr := range []string{
-				" usr",
-				" sys",
-				" idl",
-				" wai",
-				" stl",
-				" | ",
-				" read ",
-				" writ ",
-				" | ",
-				" int  ",
-				" csw  ",
-				" | ",
-				" recv ",
-				" send ",
-				" | ",
-				" used ",
-				" free ",
-				" buff ",
-				" cach",
-			} {
-				gstat.DrawString(hdr, statx, 50)
-				statx += float64(len(hdr)) * em
-			}
-
-			staty := float64(110)
-			statx = float64(50)
-
-			for idx := range last {
-				if idx == len(last)-1 {
-					break
-				}
-				last[idx] = last[idx+1]
-			}
-
-			var lastrow [][]string
-			for _, mod := range modules {
-				var modcols []string
-				cols := mod.ProcessAndFormat(contents)
-				for _, col := range cols {
-					colored := col.RenderCustom(func(color, text string) string {
-						return "$" + color + "$" + text
-					})
-					modcols = append(modcols, colored)
-				}
-				lastrow = append(lastrow, modcols)
-			}
-			last[len(last)-1] = lastrow
-
-			for _, lastrow := range last {
-				statx = 50
-				for _, modcols := range lastrow {
-					for _, colored := range modcols {
-						statx += em
-						for idx, field := range strings.Split(strings.TrimPrefix(colored, "$"), "$") {
-
-							if idx%2 == 0 {
-								col := colorNameToRGBA[field]
-								gstat.SetRGB255(int(col.R), int(col.G), int(col.B))
-							} else {
-								gstat.DrawString(field, statx, staty)
-								statx += float64(len(field)) * em
-							}
-						}
-
-					}
-					statx += 3 * em
-				}
-				staty += gstat.FontHeight() * lineSpacing
-			}
-
-			// --------------------------------------------------------------------------------
-
-			t2 := time.Now()
-			{
-				r, gg, b, a := bgcolor.RGBA()
-				g.SetRGBA(
-					float64(r)/0xffff,
-					float64(gg)/0xffff,
-					float64(b)/0xffff,
-					float64(a)/0xffff)
-			}
-			g.Clear()
-			g.SetRGB(1, 1, 1)
-			lines := []string{
-				"host “" + hostname + "” (" + gokrazy.Model() + ")",
-				"time: " + time.Now().Format(time.RFC3339),
-			}
-			if up, err := uptime(); err == nil {
-				last := len(lines) - 1
-				lines[last] += ", up for " + up
-			}
-			if lastRender > 0 || lastCopy > 0 {
-				last := len(lines) - 1
-				lines[last] += fmt.Sprintf(", fb: draw %v, cp %v",
-					lastRender.Round(time.Millisecond),
-					lastCopy.Round(time.Millisecond))
-			}
-			lines = append(lines, "")
-			lines = append(lines, "Private IP addresses:")
-			if addrs, err := gokrazy.PrivateInterfaceAddrs(); err == nil {
-				lines = append(lines, addrs...)
-			}
-			lines = append(lines, "")
-			lines = append(lines, "Public IP addresses:")
-			if addrs, err := gokrazy.PublicInterfaceAddrs(); err == nil {
-				lines = append(lines, addrs...)
-			}
-			texty := 100
-
-			for _, line := range lines {
-				g.DrawString(line, 50, float64(texty))
-				texty += int(g.FontHeight() * lineSpacing)
-			}
-			leftHalf := image.Rect(0, 0, w/2, h)
-			draw.Draw(buffer, leftHalf, g.Image(), image.ZP, draw.Src)
-
-			rightHalf := image.Rect(w/2, 0, w, 150)
-			draw.Draw(buffer, rightHalf, ggopher.Image(), image.ZP, draw.Src)
-
-			// display stat output in the bottom half
-			draw.Draw(buffer, statArea, gstat.Image(), image.ZP, draw.Src)
-
-			lastRender = time.Since(t2)
-
-			t3 := time.Now()
-			// NOTE: This code path is NOT using double buffering (which is done
-			// using the pan ioctl when using the frame buffer), but in practice
-			// updates seem smooth enough, most likely because we are only
-			// updating timestamps.
-			if x, ok := img.(*fbimage.BGR565); ok {
-				copyRGBAtoBGR565(x, buffer)
-			} else {
-				if !slowPathNotified {
-					log.Printf("framebuffer not using pixel format BGR565, falling back to slow path")
-					slowPathNotified = true
-				}
-				draw.Draw(img, bounds, buffer, image.Point{}, draw.Src)
-			}
-			lastCopy = time.Since(t3)
 		}
 
 		select {
 		case <-ctx.Done():
 			// return to trigger the deferred cleanup function
 			return ctx.Err()
+
 		case <-cons.Redraw():
 			break // next iteration
+
 		case <-tick:
 			break
 		}
 	}
-
-	return nil
 }
 
 // copyRGBAtoBGR565 is an inlined version of the hot pixel copying loop for the
