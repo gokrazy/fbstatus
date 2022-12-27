@@ -16,9 +16,11 @@ import (
 	"io/ioutil"
 	"log"
 	"math"
+	"net"
 	"os"
 	"os/signal"
 	"runtime/pprof"
+	"sort"
 	"strings"
 	"time"
 
@@ -365,11 +367,21 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	lines = append(lines, "")
 	lines = append(lines, "Private IP addresses:")
 	if addrs, err := gokrazy.PrivateInterfaceAddrs(); err == nil {
-		lines = append(lines, addrs...)
+		sort.Strings(addrs)
+		for _, addr := range addrs {
+			// Filter out loopback addresses (127.0.0.1 and ::1 typically), as
+			// they are always present.
+			if net.ParseIP(addr).IsLoopback() {
+				continue
+			}
+
+			lines = append(lines, addr)
+		}
 	}
 	lines = append(lines, "")
 	lines = append(lines, "Public IP addresses:")
 	if addrs, err := gokrazy.PublicInterfaceAddrs(); err == nil {
+		sort.Strings(addrs)
 		lines = append(lines, addrs...)
 	}
 	texty := int(6 * em)
