@@ -83,17 +83,18 @@ var colorNameToRGBA = map[string]color.NRGBA{
 
 type statusDrawer struct {
 	// config
-	img      draw.Image
-	bounds   image.Rectangle
-	w, h     int
-	buffer   *image.RGBA
-	files    map[string]*os.File
-	bgcolor  color.RGBA
-	hostname string
-	modules  []statexp.ProcessAndFormatter
-	g        *gg.Context
-	gstat    *gg.Context
-	ggopher  *gg.Context
+	img         draw.Image
+	bounds      image.Rectangle
+	w, h        int
+	scaleFactor float64
+	buffer      *image.RGBA
+	files       map[string]*os.File
+	bgcolor     color.RGBA
+	hostname    string
+	modules     []statexp.ProcessAndFormatter
+	g           *gg.Context
+	gstat       *gg.Context
+	ggopher     *gg.Context
 
 	// state
 	slowPathNotified     bool
@@ -177,8 +178,8 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	}
 	ggopher.Clear()
 	ggopher.SetRGB(1, 1, 1)
-	padX = ((w / 2) - 200) / 2
-	ggopher.DrawString("gokrazy!", float64(padX)-90, 125)
+	padX = ((w / 2) - int(66*scaleFactor)) / 2
+	ggopher.DrawString("gokrazy!", float64(padX)-(30*scaleFactor), 42*scaleFactor)
 
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -211,18 +212,19 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	// --------------------------------------------------------------------------------
 
 	return &statusDrawer{
-		img:      img,
-		bounds:   bounds,
-		w:        w,
-		h:        h,
-		buffer:   buffer,
-		modules:  modules,
-		hostname: hostname,
-		files:    files,
-		bgcolor:  bgcolor,
-		g:        g,
-		gstat:    gstat,
-		ggopher:  ggopher,
+		img:         img,
+		bounds:      bounds,
+		w:           w,
+		h:           h,
+		scaleFactor: scaleFactor,
+		buffer:      buffer,
+		modules:     modules,
+		hostname:    hostname,
+		files:       files,
+		bgcolor:     bgcolor,
+		g:           g,
+		gstat:       gstat,
+		ggopher:     ggopher,
 
 		last: make([][][]string, 10),
 	}, nil
@@ -379,7 +381,7 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	leftHalf := image.Rect(0, 0, d.w/2, d.h)
 	draw.Draw(d.buffer, leftHalf, d.g.Image(), image.ZP, draw.Src)
 
-	rightHalf := image.Rect(d.w/2, 0, d.w, 150)
+	rightHalf := image.Rect(d.w/2, 0, d.w, int(50*d.scaleFactor))
 	draw.Draw(d.buffer, rightHalf, d.ggopher.Image(), image.ZP, draw.Src)
 
 	// display stat output in the bottom half
