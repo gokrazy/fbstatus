@@ -106,6 +106,12 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	w := bounds.Max.X
 	h := bounds.Max.Y
 
+	scaleFactor := math.Floor(float64(w) / 1024)
+	if scaleFactor < 1 {
+		scaleFactor = 1
+	}
+	log.Printf("font scale factor: %.f", scaleFactor)
+
 	// draw the gokrazy gopher image
 	gokrazyLogo, _, err := image.Decode(bytes.NewReader(gokrazyLogoPNG))
 	if err != nil {
@@ -121,7 +127,7 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	draw.Draw(buffer, bounds, &image.Uniform{bgcolor}, image.Point{}, draw.Src)
 
 	// place the gopher in the top right half (centered)
-	const borderTop = 150
+	borderTop := int(50 * scaleFactor)
 	gopherRect := scaleImage(gokrazyLogo.Bounds(), w/2, h/2-borderTop)
 	gopherRect = gopherRect.Add(image.Point{w / 2, 0})
 	padX := ((w / 2) - gopherRect.Size().X) / 2
@@ -143,11 +149,6 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	}
 
 	size := float64(16)
-	scaleFactor := math.Floor(float64(w) / 1024)
-	if scaleFactor < 1 {
-		scaleFactor = 1
-	}
-	log.Printf("font scale factor: %.f", scaleFactor)
 	size *= scaleFactor
 	face := truetype.NewFace(font, &truetype.Options{Size: size})
 	g.SetFontFace(face)
