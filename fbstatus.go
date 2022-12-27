@@ -262,7 +262,7 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	em, _ := d.gstat.MeasureString("m")
 
 	// render header
-	statx := float64(50)
+	statx := 3 * em
 	// TODO: look into why MeasureString/DrawString are not monospace-correct
 	for _, hdr := range []string{
 		" usr",
@@ -285,12 +285,12 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 		" buff ",
 		" cach",
 	} {
-		d.gstat.DrawString(hdr, statx, 50)
+		d.gstat.DrawString(hdr, statx, 3*em)
 		statx += float64(len(hdr)) * em
 	}
 
-	staty := float64(110)
-	statx = float64(50)
+	staty := 6 * em
+	statx = 3 * em
 
 	for idx := range d.last {
 		if idx == len(d.last)-1 {
@@ -314,7 +314,7 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	d.last[len(d.last)-1] = lastrow
 
 	for _, lastrow := range d.last {
-		statx = 50
+		statx = 3 * em
 		for _, modcols := range lastrow {
 			for _, colored := range modcols {
 				statx += em
