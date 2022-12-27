@@ -372,10 +372,10 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	if addrs, err := gokrazy.PublicInterfaceAddrs(); err == nil {
 		lines = append(lines, addrs...)
 	}
-	texty := 100
+	texty := int(6 * em)
 
 	for _, line := range lines {
-		d.g.DrawString(line, 50, float64(texty))
+		d.g.DrawString(line, 3*em, float64(texty))
 		texty += int(d.g.FontHeight() * lineSpacing)
 	}
 	leftHalf := image.Rect(0, 0, d.w/2, d.h)
