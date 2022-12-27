@@ -144,6 +144,9 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 
 	size := float64(16)
 	scaleFactor := math.Floor(float64(w) / 1024)
+	if scaleFactor < 1 {
+		scaleFactor = 1
+	}
 	log.Printf("font scale factor: %.f", scaleFactor)
 	size *= scaleFactor
 	face := truetype.NewFace(font, &truetype.Options{Size: size})
