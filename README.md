@@ -16,14 +16,12 @@ This graphical output is helpful to understand:
 
 Please refer to [the gokrazy quickstart](https://gokrazy.org/quickstart/) if you are unfamiliar.
 
-Then, add the fbstatus package to your packer command line:
+The `gok new` command already adds the `fbstatus` package by default, so no
+further customization is needed. If you have removed the package for some
+reason, you can always re-add it with:
 
 ```
-gokr-packer \
-	-update=yes \
-	github.com/gokrazy/fbstatus \
-	github.com/gokrazy/hello \
-	github.com/gokrazy/serial-busybox
+gok add github.com/gokrazy/fbstatus
 ```
 
 After your Raspberry Pi reboots, you should eventually see the graphical output
