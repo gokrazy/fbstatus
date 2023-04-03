@@ -17,6 +17,8 @@ import (
 	"log"
 	"math"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"runtime/pprof"
@@ -526,6 +528,7 @@ var gokrazyLogoPNG []byte
 
 func main() {
 	var cpuprofile = flag.String("cpuprofile", "", "cpu profile")
+	var debugListen = flag.String("debug-listen", "", "if non-empty, listen address for debug pprof server")
 	flag.Parse()
 
 	if *cpuprofile != "" {
@@ -535,6 +538,16 @@ func main() {
 		}
 		pprof.StartCPUProfile(f)
 		defer pprof.StopCPUProfile()
+	}
+
+	if *debugListen != "" {
+		go func() {
+			log.Printf("Running debug server on %v ...", *debugListen)
+			http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, "/debug/pprof", http.StatusFound)
+			})
+			log.Fatal(http.ListenAndServe(*debugListen, nil))
+		}()
 	}
 
 	if err := fbstatus(); err != nil {
