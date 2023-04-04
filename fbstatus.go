@@ -125,7 +125,7 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 
 	// We do all rendering into an *image.RGBA buffer, for which all drawing
 	// operations are optimized in Go. Only at the very end do we copy the
-	// buffer contents to the (BGR565) framebuffer.
+	// buffer contents to the framebuffer (BGR565 or BGRA)
 	buffer := image.NewRGBA(bounds)
 	draw.Draw(buffer, bounds, &image.Uniform{bgcolor}, image.Point{}, draw.Src)
 
@@ -406,11 +406,14 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	// using the pan ioctl when using the frame buffer), but in practice
 	// updates seem smooth enough, most likely because we are only
 	// updating timestamps.
-	if x, ok := d.img.(*fbimage.BGR565); ok {
+	switch x := d.img.(type) {
+	case *fbimage.BGR565:
 		copyRGBAtoBGR565(x, d.buffer)
-	} else {
+	case *fbimage.BGRA:
+		copyRGBAtoBGRA(x, d.buffer)
+	default:
 		if !d.slowPathNotified {
-			log.Printf("framebuffer not using pixel format BGR565, falling back to slow path")
+			log.Printf("framebuffer not using pixel format BGR565, falling back to slow path for img type %T", d.img)
 			d.slowPathNotified = true
 		}
 		draw.Draw(d.img, d.bounds, d.buffer, image.Point{}, draw.Src)
@@ -518,6 +521,19 @@ func copyRGBAtoBGR565(dst *fbimage.BGR565, src *image.RGBA) {
 			pix[0] = (c.B >> 3) | ((c.G >> 2) << 5)
 			pix[1] = (c.G >> 5) | ((c.R >> 3) << 3)
 		}
+	}
+}
+
+// copyRGBAtoBGRA is an inlined version of the hot pixel copying loop for the
+// special case of copying from an *image.RGBA to an *fbimage.BGRA.
+//
+// This specialization brings down copying time to 5ms (from 60-70ms) on an
+// amd64 qemu VM with virtio VGA.
+func copyRGBAtoBGRA(dst *fbimage.BGRA, src *image.RGBA) {
+	for i := 0; i < len(src.Pix); i += 4 {
+		s := src.Pix[i : i+4 : i+4]
+		d := dst.Pix[i : i+4 : i+4]
+		d[0], d[1], d[2], d[3] = s[2], s[1], s[0], s[3]
 	}
 }
 
