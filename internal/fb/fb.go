@@ -84,8 +84,8 @@ func (d *Device) Image() (draw.Image, error) {
 		// The Linux efifb driver typically defaults to 32 bpp.
 
 		virtual := image.Rect(0, 0, int(vinfo.Xres_virtual), int(vinfo.Yres_virtual))
-		if virtual.Dx()*virtual.Dy()*4 != len(d.mmap) {
-			return nil, errors.New("virtual resolution doesn't match framebuffer size")
+		if virtual.Dx()*virtual.Dy()*4 > len(d.mmap) {
+			return nil, errors.New("framebuffer is too small")
 		}
 		visual := image.Rect(int(vinfo.Xoffset), int(vinfo.Yoffset), int(vinfo.Xres), int(vinfo.Yres))
 		if !visual.In(virtual) {
@@ -108,8 +108,8 @@ func (d *Device) Image() (draw.Image, error) {
 		// Blue:{Offset:0 Length:5 Right:0} Transp:{Offset:0 Length:0 Right:0} Nonstd:0 Activate:0 Height:290 Width:520 Accel_flags:1 Pixclock:0 Left_margin:0 Right_margin:0 Upper_margin:0 Lower_margin:0 Hsync_len:0 Vsync_len:0 Sync:0 Vmode:0 Rotate:0 Colorspace:0 Reserved:[0 0 0 0]}
 
 		virtual := image.Rect(0, 0, int(vinfo.Xres_virtual), int(vinfo.Yres_virtual))
-		if virtual.Dx()*virtual.Dy()*2 != len(d.mmap) {
-			return nil, errors.New("virtual resolution doesn't match framebuffer size")
+		if virtual.Dx()*virtual.Dy()*2 > len(d.mmap) {
+			return nil, errors.New("framebuffer is too small")
 		}
 		visual := image.Rect(int(vinfo.Xoffset), int(vinfo.Yoffset), int(vinfo.Xres), int(vinfo.Yres))
 		if !visual.In(virtual) {
