@@ -217,6 +217,10 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	// padding within the gopher column
 	padX = (gopherW - int(66*scaleFactor)) / 2
 	ggopher.DrawString("gokrazy!", float64(padX)-(30*scaleFactor), 42*scaleFactor)
+	// Only render the tagline once, which is part of the right column.
+	// This and the gopher do not need to be redrawn.
+	rightCol := image.Rect(hostW, 0, w, int(50*scaleFactor))
+	draw.Draw(buffer, rightCol, ggopher.Image(), image.ZP, draw.Src)
 
 	hostname, err := os.Hostname()
 	if err != nil {
@@ -261,7 +265,6 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 		bgcolor:     bgcolor,
 		ghost:       ghost,
 		gstat:       gstat,
-		ggopher:     ggopher,
 
 		last: make([][][]string, 10),
 	}, nil
@@ -426,13 +429,9 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 
 	// global layout: two columns in the top area, bottom for status
 	leftCol := image.Rect(0, 0, int(float64(d.w)*leftFrac), d.h)
-	// NOTE: Only redraw the top part of the right column, which is the tagline.
-	// The gopher itself within the area was drawin initally and is not redrawn.
-	rightCol := image.Rect(int(float64(d.w)*leftFrac), 0, d.w, int(50*d.scaleFactor))
 	statArea := image.Rect(0, int(float64(d.h)*topFrac), d.w, d.h)
 
 	draw.Draw(d.buffer, leftCol, d.ghost.Image(), image.ZP, draw.Src)
-	draw.Draw(d.buffer, rightCol, d.ggopher.Image(), image.ZP, draw.Src)
 	draw.Draw(d.buffer, statArea, d.gstat.Image(), image.ZP, draw.Src)
 
 	d.lastRender = time.Since(t2)
