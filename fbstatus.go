@@ -42,6 +42,29 @@ import (
 	_ "image/png"
 )
 
+/* Define the layout fractions.
+ *
+ * There are two columns at the top, and the bottom is just one part.
+ * The top left show host information, time and IP addresses.
+ * The top right shows the "gokrazy!" tag line and the Gopher below it.
+ * The bottom shows the system resource use, refreshed regularly.
+ *
+ *  -------------------------
+ * | host info    | gokrazy! |
+ * |              | -------- |
+ * | IP addresses | (gopher) |
+ * |              |          |
+ * |-------------------------|
+ * |                         |
+ * |                         |
+ * |   status information    |
+ * |                         |
+ * |                         |
+ *  -------------------------
+ */
+const leftFrac = 1.0 / 2.0
+const topFrac = 1.0 / 2.0
+
 func uptime() (string, error) {
 	file, err := os.Open("/proc/uptime")
 	if err != nil {
@@ -111,6 +134,12 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	w := bounds.Max.X
 	h := bounds.Max.Y
 
+	hostW := int(float64(w) * leftFrac)
+	gopherW := w - hostW
+
+	topH := int(float64(h) * topFrac)
+	bottomH := h - topH
+
 	scaleFactor := math.Floor(float64(w) / 1024)
 	if scaleFactor < 1 {
 		scaleFactor = 1
@@ -131,21 +160,24 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	buffer := image.NewRGBA(bounds)
 	draw.Draw(buffer, bounds, &image.Uniform{bgcolor}, image.Point{}, draw.Src)
 
-	// place the gopher in the top right half (centered)
+	// NOTE: The gopher is drawn exactly once. Other areas are being refreshed.
+	// place the gopher in the top right column (centered)
 	borderTop := int(50 * scaleFactor)
-	gopherRect := scaleImage(gokrazyLogo.Bounds(), w/2, h/2-borderTop)
-	gopherRect = gopherRect.Add(image.Point{w / 2, 0})
-	padX := ((w / 2) - gopherRect.Size().X) / 2
-	padY := borderTop + ((h/2)-gopherRect.Size().Y)/2
+	gopherRect := scaleImage(gokrazyLogo.Bounds(), gopherW, topH-borderTop)
+	// add the left column width
+	gopherRect = gopherRect.Add(image.Point{hostW, 0})
+	// add the padding between column start and Gopher start for centering
+	padX := (gopherW - gopherRect.Size().X) / 2
+	padY := borderTop + (topH-gopherRect.Size().Y)/2
 	gopherRect = gopherRect.Add(image.Point{padX, padY})
 
 	t1 := time.Now()
 	xdraw.BiLinear.Scale(buffer, gopherRect, gokrazyLogo, gokrazyLogo.Bounds(), draw.Over, nil)
 	log.Printf("gopher scaled in %v", time.Since(t1))
 
-	ghost := gg.NewContext(w/2, h/2)
-	gstat := gg.NewContext(w, h/2)
-	ggopher := gg.NewContext(w/2, h/2)
+	ghost := gg.NewContext(hostW, topH)
+	ggopher := gg.NewContext(gopherW, topH)
+	gstat := gg.NewContext(w, bottomH)
 
 	// draw textual information in a block of key: value details
 	font, err := truetype.Parse(goregular.TTF)
@@ -182,7 +214,8 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	}
 	ggopher.Clear()
 	ggopher.SetRGB(1, 1, 1)
-	padX = ((w / 2) - int(66*scaleFactor)) / 2
+	// padding within the gopher column
+	padX = (gopherW - int(66*scaleFactor)) / 2
 	ggopher.DrawString("gokrazy!", float64(padX)-(30*scaleFactor), 42*scaleFactor)
 
 	hostname, err := os.Hostname()
@@ -236,8 +269,6 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 
 func (d *statusDrawer) draw1(ctx context.Context) error {
 	const lineSpacing = 1.5
-
-	statArea := image.Rect(0, d.h/2, d.w, d.h)
 
 	// --------------------------------------------------------------------------------
 	contents := make(map[string][]byte)
@@ -392,13 +423,16 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 		d.ghost.DrawString(line, 3*em, float64(texty))
 		texty += int(d.ghost.FontHeight() * lineSpacing)
 	}
-	leftHalf := image.Rect(0, 0, d.w/2, d.h)
-	draw.Draw(d.buffer, leftHalf, d.ghost.Image(), image.ZP, draw.Src)
 
-	rightHalf := image.Rect(d.w/2, 0, d.w, int(50*d.scaleFactor))
-	draw.Draw(d.buffer, rightHalf, d.ggopher.Image(), image.ZP, draw.Src)
+	// global layout: two columns in the top area, bottom for status
+	leftCol := image.Rect(0, 0, int(float64(d.w)*leftFrac), d.h)
+	// NOTE: Only redraw the top part of the right column, which is the tagline.
+	// The gopher itself within the area was drawin initally and is not redrawn.
+	rightCol := image.Rect(int(float64(d.w)*leftFrac), 0, d.w, int(50*d.scaleFactor))
+	statArea := image.Rect(0, int(float64(d.h)*topFrac), d.w, d.h)
 
-	// display stat output in the bottom half
+	draw.Draw(d.buffer, leftCol, d.ghost.Image(), image.ZP, draw.Src)
+	draw.Draw(d.buffer, rightCol, d.ggopher.Image(), image.ZP, draw.Src)
 	draw.Draw(d.buffer, statArea, d.gstat.Image(), image.ZP, draw.Src)
 
 	d.lastRender = time.Since(t2)
