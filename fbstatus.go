@@ -96,7 +96,7 @@ type statusDrawer struct {
 	bgcolor     color.RGBA
 	hostname    string
 	modules     []statexp.ProcessAndFormatter
-	g           *gg.Context
+	ghost       *gg.Context
 	gstat       *gg.Context
 	ggopher     *gg.Context
 
@@ -143,7 +143,7 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	xdraw.BiLinear.Scale(buffer, gopherRect, gokrazyLogo, gokrazyLogo.Bounds(), draw.Over, nil)
 	log.Printf("gopher scaled in %v", time.Since(t1))
 
-	g := gg.NewContext(w/2, h/2)
+	ghost := gg.NewContext(w/2, h/2)
 	gstat := gg.NewContext(w, h/2)
 	ggopher := gg.NewContext(w/2, h/2)
 
@@ -156,7 +156,7 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 	size := float64(16)
 	size *= scaleFactor
 	face := truetype.NewFace(font, &truetype.Options{Size: size})
-	g.SetFontFace(face)
+	ghost.SetFontFace(face)
 
 	monofont, err := truetype.Parse(gomono.TTF)
 	if err != nil {
@@ -226,7 +226,7 @@ func newStatusDrawer(img draw.Image) (*statusDrawer, error) {
 		hostname:    hostname,
 		files:       files,
 		bgcolor:     bgcolor,
-		g:           g,
+		ghost:       ghost,
 		gstat:       gstat,
 		ggopher:     ggopher,
 
@@ -344,14 +344,14 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	t2 := time.Now()
 	{
 		r, gg, b, a := d.bgcolor.RGBA()
-		d.g.SetRGBA(
+		d.ghost.SetRGBA(
 			float64(r)/0xffff,
 			float64(gg)/0xffff,
 			float64(b)/0xffff,
 			float64(a)/0xffff)
 	}
-	d.g.Clear()
-	d.g.SetRGB(1, 1, 1)
+	d.ghost.Clear()
+	d.ghost.SetRGB(1, 1, 1)
 	lines := []string{
 		"host “" + d.hostname + "” (" + gokrazy.Model() + ")",
 		"time: " + time.Now().Format(time.RFC3339),
@@ -389,11 +389,11 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	texty := int(6 * em)
 
 	for _, line := range lines {
-		d.g.DrawString(line, 3*em, float64(texty))
-		texty += int(d.g.FontHeight() * lineSpacing)
+		d.ghost.DrawString(line, 3*em, float64(texty))
+		texty += int(d.ghost.FontHeight() * lineSpacing)
 	}
 	leftHalf := image.Rect(0, 0, d.w/2, d.h)
-	draw.Draw(d.buffer, leftHalf, d.g.Image(), image.ZP, draw.Src)
+	draw.Draw(d.buffer, leftHalf, d.ghost.Image(), image.ZP, draw.Src)
 
 	rightHalf := image.Rect(d.w/2, 0, d.w, int(50*d.scaleFactor))
 	draw.Draw(d.buffer, rightHalf, d.ggopher.Image(), image.ZP, draw.Src)
