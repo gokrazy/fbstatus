@@ -14,8 +14,10 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const tty = "/dev/tty0"
+
 func nextFreeConsole() (int, error) {
-	f, err := os.OpenFile("/dev/tty0", os.O_WRONLY, 0)
+	f, err := os.OpenFile(tty, os.O_WRONLY, 0)
 	if err != nil {
 		return 0, err
 	}
@@ -31,7 +33,7 @@ func nextFreeConsole() (int, error) {
 }
 
 func disallocateConsole(num int) error {
-	f, err := os.OpenFile("/dev/tty0", os.O_WRONLY, 0)
+	f, err := os.OpenFile(tty, os.O_WRONLY, 0)
 	if err != nil {
 		return err
 	}
