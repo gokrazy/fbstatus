@@ -294,10 +294,20 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	d.gstat.Clear()
 	d.gstat.SetRGB(1, 1, 1)
 
+	// use the width only
 	em, _ := d.gstat.MeasureString("m")
 
+	// offset from top left corner
+	xOffset := 3.0 * em
+	yOffset := 3.0 * em
+	// extra spacing per additional row/column
+	xSpacing := 3.0 * em
+	ySpacing := 3.0 * em
+
+	statx := xOffset
+	staty := yOffset
+
 	// render header
-	statx := 3 * em
 	// TODO: look into why MeasureString/DrawString are not monospace-correct
 	for _, hdr := range []string{
 		" usr",
@@ -320,12 +330,14 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 		" buff ",
 		" cach",
 	} {
-		d.gstat.DrawString(hdr, statx, 3*em)
+		d.gstat.DrawString(hdr, statx, staty)
 		statx += float64(len(hdr)) * em
 	}
 
-	staty := 6 * em
-	statx = 3 * em
+	// reset
+	statx = xOffset
+	// add some more space from the top for actual status lines
+	staty = yOffset + ySpacing
 
 	for idx := range d.last {
 		if idx == len(d.last)-1 {
@@ -349,7 +361,7 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 	d.last[len(d.last)-1] = lastrow
 
 	for _, lastrow := range d.last {
-		statx = 3 * em
+		statx = xOffset
 		for _, modcols := range lastrow {
 			for _, colored := range modcols {
 				statx += em
@@ -365,7 +377,7 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 				}
 
 			}
-			statx += 3 * em
+			statx += xSpacing
 		}
 		staty += d.gstat.FontHeight() * lineSpacing
 	}
@@ -417,10 +429,10 @@ func (d *statusDrawer) draw1(ctx context.Context) error {
 		sort.Strings(addrs)
 		lines = append(lines, addrs...)
 	}
-	texty := int(6 * em)
+	texty := int(yOffset + ySpacing)
 
 	for _, line := range lines {
-		d.ghost.DrawString(line, 3*em, float64(texty))
+		d.ghost.DrawString(line, xOffset, float64(texty))
 		texty += int(d.ghost.FontHeight() * lineSpacing)
 	}
 
